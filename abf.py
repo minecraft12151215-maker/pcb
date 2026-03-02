@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
 import matplotlib
-# 設定 matplotlib 為背景繪圖模式，避免在伺服器上報錯
 matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
@@ -21,12 +20,11 @@ warnings.filterwarnings('ignore')
 load_dotenv()
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
-# ================= 終極雲端字型處理 (強制載入字體檔案) =================
+# ================= 終極雲端字型處理 =================
 FONT_PATH = "TaipeiSansTC.ttf"
 if not os.path.exists(FONT_PATH):
     try:
         print("📥 偵測到雲端環境，正在下載中文字型 (台北黑體)...")
-        # 改用 requests 加上 User-Agent 避免被擋，並使用穩定的字體來源
         url = "https://raw.githubusercontent.com/halfrost/Halfrost-Field/master/contents/Machine_Learning/TaipeiSansTCBeta-Regular.ttf"
         response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
         with open(FONT_PATH, "wb") as f:
@@ -35,11 +33,9 @@ if not os.path.exists(FONT_PATH):
     except Exception as e:
         print(f"❌ 字型下載失敗: {e}")
 
-# 強制建立字體物件，後續畫圖直接綁定此物件 (100% 解決 matplotlib 快取與亂碼問題)
 if os.path.exists(FONT_PATH):
     my_font = fm.FontProperties(fname=FONT_PATH)
 else:
-    # 備用方案
     my_font = fm.FontProperties(family='Microsoft JhengHei')
     
 plt.rcParams['axes.unicode_minus'] = False 
@@ -55,7 +51,6 @@ REPORT_TIME = "20:00"
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 🇹🇼 PCB 百科全書
 PCB_SUPPLY_CHAIN = {
     "🧵 上游：玻纖/樹脂/銅箔": [
         ("1802", "台玻"), ("1303", "南亞"), ("1815", "富喬"), ("5340", "建榮"), ("5475", "德宏"),
@@ -104,7 +99,6 @@ TEXT_COLOR = "#d1d4dc"
 UP_COLOR = "#ef5350"
 DOWN_COLOR = "#26a69a"
 
-# 基礎配色設定
 plt.rcParams['text.color'] = TEXT_COLOR
 plt.rcParams['axes.labelcolor'] = TEXT_COLOR
 plt.rcParams['xtick.color'] = TEXT_COLOR
@@ -112,7 +106,6 @@ plt.rcParams['ytick.color'] = TEXT_COLOR
 
 def setup_premium_axes(ax, title, ylabel=None, xlabel=None):
     ax.set_facecolor(BG_COLOR)
-    # 強制將 Title 與 Label 綁定字體物件
     ax.set_title(title, fontproperties=my_font, fontsize=16, pad=20, fontweight='bold', color='white')
     if ylabel: ax.set_ylabel(ylabel, fontproperties=my_font, fontsize=12, labelpad=10)
     if xlabel: ax.set_xlabel(xlabel, fontproperties=my_font, fontsize=12, labelpad=10)
@@ -135,18 +128,17 @@ def get_real_date():
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).date()
 
 def fetch_data_and_plot():
-    ANSI_RED, ANSI_GREEN, ANSI_YELLOW, ANSI_WHITE, ANSI_RESET = "\u001b[0;31m", "\u001b[0;32m", "\u001b[0;33m", "\u001b[0;37m", "\u001b[0m"
-    
     end_date = get_real_date()
     start_date = end_date - datetime.timedelta(days=10) 
 
     total_change = 0
     valid_count = 0
-    cat_results = {}
     all_stocks_data = [] 
+    
+    # 用來存放 Discord 文字版面的精簡摘要
+    summary_text = ""
 
     for cat, stocks in PCB_SUPPLY_CHAIN.items():
-        block_content = f"```ansi\n" 
         stock_data_list = []
         
         for code, name in stocks:
@@ -180,38 +172,34 @@ def fetch_data_and_plot():
             except Exception as e: 
                 pass
         
+        # 排序並萃取該板塊精華 (只抓漲幅前 3 名作為領漲代表)
         stock_data_list.sort(key=lambda x: x['change'], reverse=True)
-        for s in stock_data_list:
-            color = ANSI_RED if s['change'] > 0 else ANSI_GREEN if s['change'] < 0 else ANSI_WHITE
-            # 訊息內文依然保留 Emoji 火焰
-            vol_color, burst_mark = (ANSI_YELLOW, " 🔥") if s['is_burst'] else (ANSI_WHITE, "")
-            
-            display_name = s['name'][:4] 
-            id_name = f"{s['code']} {display_name}".ljust(9)
-            price_str = f"{s['price']:.1f}".rjust(6)
-            pct_str = f"{s['change']:+.1f}%".rjust(7)
-            vol_str = f"{s['vol']:,}張".rjust(9) 
-            block_content += f"{id_name} {price_str} {color}{pct_str}{ANSI_RESET} {vol_color}{vol_str}{burst_mark}{ANSI_RESET}\n"
-            
-        block_content += "```"
-        cat_results[cat] = block_content
+        cat_avg = sum(s['change'] for s in stock_data_list) / len(stock_data_list) if stock_data_list else 0
+        
+        # 整理文字：只顯示大於 0% 的前三名強勢股
+        top_gainers = [f"{s['name']}({s['change']:+.1f}%)" for s in stock_data_list[:3] if s['change'] > 0]
+        top_str = "、".join(top_gainers) if top_gainers else "無明顯漲勢"
+        
+        # 組合該板塊的精簡文字
+        color_icon = "🔴" if cat_avg > 0 else "🟢" if cat_avg < 0 else "⚪"
+        summary_text += f"**{cat}** ｜ {color_icon} 平均 `{cat_avg:+.2f}%`\n"
+        summary_text += f"└ 🔥 領漲：*{top_str}*\n\n"
 
     avg_change = total_change / valid_count if valid_count > 0 else 0
     df_plot = pd.DataFrame(all_stocks_data)
 
-    # =============== 強制套用字體繪製圖表 ===============
+    # =============== 繪製圖表 ===============
     if not df_plot.empty:
         # 【圖一】各板塊資金熱度
         fig1, ax1 = plt.subplots(figsize=(12, 7))
         fig1.patch.set_facecolor(BG_COLOR) 
         
-        cat_avg = df_plot.groupby('Category')['Change'].mean().sort_values(ascending=True)
-        colors1 = [DOWN_COLOR if x < 0 else UP_COLOR for x in cat_avg]
-        bars1 = ax1.barh(cat_avg.index, cat_avg.values, color=colors1, height=0.6, alpha=0.9)
+        cat_avg_df = df_plot.groupby('Category')['Change'].mean().sort_values(ascending=True)
+        colors1 = [DOWN_COLOR if x < 0 else UP_COLOR for x in cat_avg_df]
+        bars1 = ax1.barh(cat_avg_df.index, cat_avg_df.values, color=colors1, height=0.6, alpha=0.9)
         ax1.axvline(x=0, color=TEXT_COLOR, linestyle='-', linewidth=1, alpha=0.5)
         setup_premium_axes(ax1, f'🎯 PCB 各次產業平均資金熱度 ({end_date})', xlabel='平均漲跌幅 (%)')
 
-        # 強制替換 Y 軸字體
         for label in ax1.get_yticklabels():
             label.set_fontproperties(my_font)
             label.set_fontsize(11)
@@ -220,7 +208,6 @@ def fetch_data_and_plot():
             width = bar.get_width()
             x_pos = width + 0.15 if width > 0 else width - 0.15
             ha = 'left' if width > 0 else 'right'
-            # 強制替換數字標籤字體
             ax1.text(x_pos, bar.get_y() + bar.get_height()/2, f'{width:+.2f}%', 
                      ha=ha, va='center', fontproperties=my_font, fontsize=11, fontweight='bold', color='white')
 
@@ -238,14 +225,12 @@ def fetch_data_and_plot():
         ax2.axhline(y=0, color=TEXT_COLOR, linestyle='-', linewidth=1, alpha=0.5)
         setup_premium_axes(ax2, f'🚀 PCB 產業鏈 - 漲幅前 15 名強勢股 ({end_date})', ylabel='漲跌幅 (%)')
 
-        # 強制替換 X 軸字體
         for label in ax2.get_xticklabels():
             label.set_fontproperties(my_font)
             label.set_fontsize(11)
 
         for bar, is_burst in zip(bars2, top_15['Burst']):
             height = bar.get_height()
-            # 圖片上的 Emoji 改為純文字 [爆量] 確保不破圖
             burst_text = "[爆量]" if is_burst else ""
             ax2.text(bar.get_x() + bar.get_width()/2, height + 0.2, 
                      f'{height:+.1f}%\n{burst_text}', 
@@ -255,48 +240,29 @@ def fetch_data_and_plot():
         plt.savefig('top15.png', dpi=200, facecolor=fig2.get_facecolor(), edgecolor='none')
         plt.close(fig2)
 
-    return cat_results, avg_change, end_date
+    return summary_text, avg_change, end_date
 
 async def send_report(channel):
-    msg = await channel.send("🏗️ **正在雲端安全掃描近 90 檔 PCB 全產業鏈，並生成高畫質戰情圖表，請稍候約 45 秒...**")
+    msg = await channel.send("🏗️ **正在生成極簡版 PCB 戰情儀表板，請稍候約 45 秒...**")
     
     try:
-        cat_res, avg_chg, data_date = await asyncio.to_thread(fetch_data_and_plot)
+        summary_text, avg_chg, data_date = await asyncio.to_thread(fetch_data_and_plot)
         
         embed_color = 0xff4757 if avg_chg > 0 else 0x2ecc71
-        therm = "🔥 資金湧入" if avg_chg > 0.5 else "🧊 資金撤退" if avg_chg < -0.5 else "⚖️ 多空平衡"
+        therm = "🔥 資金全面湧入" if avg_chg > 0.5 else "🧊 資金正在撤退" if avg_chg < -0.5 else "⚖️ 多空力道平衡"
 
-        embeds_to_send = []
-        
-        current_embed = discord.Embed(
-            title=f"🎯 台股 PCB 全百科戰略地圖 | {data_date}",
-            description="嚴格追蹤從「玻纖銅箔」、「耗材設備」到「各式板廠」的最完整資金輪動",
+        # 建立單一極簡版 Embed
+        embed = discord.Embed(
+            title=f"📊 台股 PCB 戰略儀表板 | {data_date}",
+            description=f"**大盤產業鏈綜合熱度：** {therm} (平均 **{avg_chg:+.2f}%**)\n\n" + summary_text,
             color=embed_color
         )
-        current_embed.add_field(name=f"🇹🇼 產業鏈綜合熱度：{therm}", value=f"平均漲跌幅：**{avg_chg:+.2f}%**", inline=False)
+        embed.set_footer(text="詳細個股排行請見下方圖表 ｜ 數據來源：Yahoo Finance")
 
-        for cat, content in cat_res.items():
-            if "```ansi\n```" in content or len(content.strip()) <= 15:
-                continue 
+        # 編輯覆蓋原本的等待訊息
+        await msg.edit(content=None, embed=embed)
 
-            if len(current_embed) + len(cat) + len(content) > 5000:
-                embeds_to_send.append(current_embed)
-                current_embed = discord.Embed(color=embed_color)
-
-            current_embed.add_field(name=f"**{cat}**", value=content, inline=False)
-
-        if len(current_embed.fields) > 0:
-            embeds_to_send.append(current_embed)
-
-        if embeds_to_send:
-            embeds_to_send[-1].set_footer(text="數據來源：Yahoo Finance ｜ 紅色=漲 ｜ 綠色=跌 ｜ 黃色數字+🔥=爆量")
-
-        for i, emb in enumerate(embeds_to_send):
-            if i == 0:
-                await msg.edit(content=None, embed=emb)
-            else:
-                await channel.send(embed=emb)
-
+        # 接著發送圖表
         files = []
         if os.path.exists('heatmap.png'):
             files.append(discord.File('heatmap.png'))
@@ -307,7 +273,7 @@ async def send_report(channel):
             await channel.send(files=files)
 
     except Exception as e:
-        await msg.edit(content=f"❌ 抓取資料或繪圖時發生錯誤：`{e}`")
+        await msg.edit(content=f"❌ 發生錯誤：`{e}`")
 
 @tasks.loop(minutes=1)
 async def schedule_task():
@@ -326,9 +292,9 @@ async def pcb(ctx):
 
 @bot.event
 async def on_ready():
-    print(f'🎯 雲端防擋版 PCB 百科戰情室 {bot.user} 已上線！')
+    print(f'🎯 雲端極簡版 PCB 戰情室 {bot.user} 已上線！')
     if not schedule_task.is_running():
         schedule_task.start()
-        print(f"⏰ 定時播報任務已啟動！(設定時間: {REPORT_TIME} 台灣時間)")
+        print(f"⏰ 定時播報任務已啟動！({REPORT_TIME})")
 
 bot.run(TOKEN)
