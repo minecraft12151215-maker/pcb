@@ -24,7 +24,7 @@ if not TOKEN:
     raise ValueError("❌ 找不到 DISCORD_TOKEN！請確認 .env 檔案或 Railway 環境變數是否已設定。")
 
 # 2. PCB 專屬的發送頻道 ID
-TARGET_CHANNEL_ID = 1477660722786996294
+TARGET_CHANNEL_ID = 1478008186916307019
 
 # 3. 自動播報時間設定 (24小時制，台灣時間)
 REPORT_TIME = "20:00"
@@ -232,3 +232,4 @@ async def on_ready():
         print(f"⏰ 定時播報任務已啟動！(設定時間: {REPORT_TIME} 台灣時間)")
 
 bot.run(TOKEN)
+
