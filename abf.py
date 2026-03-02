@@ -27,7 +27,7 @@ if not TOKEN:
 TARGET_CHANNEL_ID = 1478008186916307019
 
 # 3. 自動播報時間設定 (24小時制，台灣時間)
-REPORT_TIME = "20:00"
+REPORT_TIME = "20:50"
 # =========================================
 
 intents = discord.Intents.all()
@@ -232,4 +232,5 @@ async def on_ready():
         print(f"⏰ 定時播報任務已啟動！(設定時間: {REPORT_TIME} 台灣時間)")
 
 bot.run(TOKEN)
+
 
