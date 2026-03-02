@@ -17,10 +17,9 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # ================= 設定區 =================
 
-# 1. 透過環境變數安全讀取 Token (請在 .env 或 Railway 後台設定 DISCORD_TOKEN)
+# 1. 透過環境變數安全讀取 Token
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-# 安全機制：如果抓不到 Token，直接停止執行並報錯
 if not TOKEN:
     raise ValueError("❌ 找不到 DISCORD_TOKEN！請確認 .env 檔案或 Railway 環境變數是否已設定。")
 
@@ -28,14 +27,13 @@ if not TOKEN:
 TARGET_CHANNEL_ID = 1477660722786996294
 
 # 3. 自動播報時間設定 (24小時制，台灣時間)
-# 因為下方 schedule_task 已經有寫 UTC+8 轉換，所以這裡直接填寫台灣時間即可，不用擔心 Railway 伺服器時區差異。
 REPORT_TIME = "20:00"
 # =========================================
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 🇹🇼 PCB 百科全書 (原汁原味保留：嚴格去重、完美分類)
+# 🇹🇼 PCB 百科全書
 PCB_SUPPLY_CHAIN = {
     "🧵 上游：玻纖/樹脂/銅箔": [
         ("1802", "台玻"), ("1303", "南亞"), ("1815", "富喬"), ("5340", "建榮"), ("5475", "德宏"),
@@ -78,7 +76,6 @@ PCB_SUPPLY_CHAIN = {
 }
 
 def get_real_date():
-    """🌍 網路校時：抓取真實台灣時間日期"""
     try:
         res = requests.head("https://www.google.com", timeout=5)
         if 'Date' in res.headers:
@@ -87,11 +84,9 @@ def get_real_date():
             return tw_time.date()
     except Exception as e:
         print(f"校時失敗: {e}")
-    # 備案：本地轉換
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).date()
 
 def fetch_data():
-    """✅ 將 90 檔股票的爬取工作放入穩定背景執行，避免斷線"""
     ANSI_RED = "\u001b[0;31m"    
     ANSI_GREEN = "\u001b[0;32m"  
     ANSI_YELLOW = "\u001b[0;33m" 
@@ -100,7 +95,6 @@ def fetch_data():
 
     end_date = get_real_date()
     start_date = end_date - datetime.timedelta(days=10) 
-    print(f"📅 系統校正日期範圍：{start_date} ~ {end_date}")
 
     total_change = 0
     valid_count = 0
@@ -114,7 +108,6 @@ def fetch_data():
             try:
                 ticker = f"{code}.TW"
                 df = yf.Ticker(ticker).history(start=start_date, end=end_date + datetime.timedelta(days=1))
-                # 如果上市沒抓到，換抓上櫃
                 if df.empty:
                     ticker = f"{code}.TWO"
                     df = yf.Ticker(ticker).history(start=start_date, end=end_date + datetime.timedelta(days=1))
@@ -124,12 +117,10 @@ def fetch_data():
                     prev_close = df['Close'].iloc[-2]
                     change = ((close - prev_close) / prev_close) * 100
                     
-                    # 確保成交量正確換算為「張」
                     vol_today = df['Volume'].iloc[-1]
                     vol_yest = df['Volume'].iloc[-2]
                     vol_lots = int(vol_today / 1000) if not df['Volume'].isna().iloc[-1] else 0
                     
-                    # 🔥 爆量判斷：量增 1.5 倍 & 張數 > 500
                     is_burst = vol_today > (vol_yest * 1.5) and vol_lots > 500
 
                     stock_data_list.append({
@@ -141,7 +132,6 @@ def fetch_data():
             except Exception as e: 
                 print(f"台股抓取錯誤 {code}: {e}")
         
-        # 排序：漲幅高的排上面
         stock_data_list.sort(key=lambda x: x['change'], reverse=True)
 
         for s in stock_data_list:
@@ -156,14 +146,12 @@ def fetch_data():
                 vol_color = ANSI_WHITE
                 burst_mark = ""
 
-            # 縮短名字以防跑版，排版對齊
             display_name = s['name'][:4] 
             id_name = f"{s['code']} {display_name}".ljust(9)
             price_str = f"{s['price']:.1f}".rjust(6)
             pct_str = f"{s['change']:+.1f}%".rjust(7)
             vol_str = f"{s['vol']:,}張".rjust(9) 
             
-            # 組合字串
             block_content += f"{id_name} {price_str} {color}{pct_str}{ANSI_RESET} {vol_color}{vol_str}{burst_mark}{ANSI_RESET}\n"
             
         block_content += "```"
@@ -175,34 +163,53 @@ def fetch_data():
 async def send_report(channel):
     msg = await channel.send("🏗️ **正在雲端安全掃描近 90 檔 PCB 全產業鏈，請稍候約 45 秒...**")
     
-    # 🛠️ 關鍵優化：利用 asyncio.to_thread 把耗時的抓取任務丟到背景，機器人不會卡死！
     try:
         cat_res, avg_chg, data_date = await asyncio.to_thread(fetch_data)
         
         embed_color = 0xff4757 if avg_chg > 0 else 0x2ecc71
+        therm = "🔥 資金湧入" if avg_chg > 0.5 else "🧊 資金撤退" if avg_chg < -0.5 else "⚖️ 多空平衡"
+
+        embeds_to_send = []
         
-        embed = discord.Embed(
+        # 建立第一個主要的 Embed (只有第一頁有標題和說明)
+        current_embed = discord.Embed(
             title=f"🎯 台股 PCB 全百科戰略地圖 | {data_date}",
             description="嚴格追蹤從「玻纖銅箔」、「耗材設備」到「各式板廠」的最完整資金輪動",
             color=embed_color
         )
-
-        therm = "🔥 資金湧入" if avg_chg > 0.5 else "🧊 資金撤退" if avg_chg < -0.5 else "⚖️ 多空平衡"
-        embed.add_field(name=f"🇹🇼 產業鏈綜合熱度：{therm}", value=f"平均漲跌幅：**{avg_chg:+.2f}%**", inline=False)
+        current_embed.add_field(name=f"🇹🇼 產業鏈綜合熱度：{therm}", value=f"平均漲跌幅：**{avg_chg:+.2f}%**", inline=False)
 
         for cat, content in cat_res.items():
-            if "```ansi\n```" not in content: # 避免送出空板塊
-                embed.add_field(name=f"**{cat}**", value=content, inline=False)
+            if "```ansi\n```" in content or len(content.strip()) <= 15:
+                continue 
 
-        embed.set_footer(text="數據來源：Yahoo Finance ｜ 紅色=漲 ｜ 綠色=跌 ｜ 黃色數字+🔥=爆量")
-        
-        await msg.edit(content=None, embed=embed)
+            # 如果加上下一個板塊會超過安全限制，就先存起來並開新的
+            if len(current_embed) + len(cat) + len(content) > 5000:
+                embeds_to_send.append(current_embed)
+                
+                # 開啟新的 Embed (不加標題、不加敘述，只保留左側顏色條，營造無縫接軌視覺感)
+                current_embed = discord.Embed(color=embed_color)
+
+            current_embed.add_field(name=f"**{cat}**", value=content, inline=False)
+
+        if len(current_embed.fields) > 0:
+            embeds_to_send.append(current_embed)
+
+        # 加上版權/備註資訊 (只加在最後一頁的底部)
+        if embeds_to_send:
+            embeds_to_send[-1].set_footer(text="數據來源：Yahoo Finance ｜ 紅色=漲 ｜ 綠色=跌 ｜ 黃色數字+🔥=爆量")
+
+        for i, emb in enumerate(embeds_to_send):
+            if i == 0:
+                await msg.edit(content=None, embed=emb)
+            else:
+                await channel.send(embed=emb)
+
     except Exception as e:
         await msg.edit(content=f"❌ 抓取資料時發生錯誤：`{e}`")
 
 @tasks.loop(minutes=1)
 async def schedule_task():
-    # 強制使用台灣時間 (UTC+8) 判斷，避免伺服器時區問題
     tw_time = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
     now = tw_time.strftime("%H:%M")
     
@@ -210,7 +217,7 @@ async def schedule_task():
         ch = bot.get_channel(TARGET_CHANNEL_ID)
         if ch: 
             await send_report(ch)
-        await asyncio.sleep(61) # 確保同一分鐘內不會重複發送
+        await asyncio.sleep(61)
 
 @bot.command()
 async def pcb(ctx):
@@ -220,7 +227,6 @@ async def pcb(ctx):
 async def on_ready():
     print(f'🎯 雲端防擋版 PCB 百科戰情室 {bot.user} 已上線！')
     
-    # 確保定時任務啟動
     if not schedule_task.is_running():
         schedule_task.start()
         print(f"⏰ 定時播報任務已啟動！(設定時間: {REPORT_TIME} 台灣時間)")
